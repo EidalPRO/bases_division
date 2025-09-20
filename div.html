@@ -1,0 +1,541 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="shortcut icon" href="/tecNM logo.png" type="image/x-icon">
+<title>División en base N - Visualizador</title>
+<style>
+  :root{--bg:#f3f7fb;--card:#fff;--accent:#1155cc;--muted:#666}
+  *{box-sizing:border-box}
+  body{font-family:Inter, Roboto, "Segoe UI", Arial, sans-serif;background:var(--bg);margin:0;padding:18px;color:#0b243b}
+  .wrap{max-width:1100px;margin:0 auto}
+  header{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  header h1{font-size:18px;margin:0}
+  .card{background:var(--card);padding:14px;border-radius:12px;box-shadow:0 6px 22px rgba(8,20,40,0.06)}
+  form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  label{font-size:13px;color:var(--muted)}
+  input, select{width:100%;padding:10px;border-radius:8px;border:1px solid #d0d7df;font-size:15px}
+  .full{grid-column:1/-1}
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+  button{background:var(--accent);color:white;padding:10px 14px;border-radius:8px;border:0;cursor:pointer}
+  button.secondary{background:#e7eefc;color:#08306a}
+  main{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+  .out{overflow:auto;padding:12px;font-family:monospace;background:#fbfeff;border-radius:8px;border:1px solid #e6eff8}
+  pre{white-space:pre-wrap;font-family:monospace;margin:0}
+  .small{font-size:13px;color:var(--muted)}
+  .table-mult{background:#fff;padding:8px;border-radius:8px}
+  .steps{background:#fff;padding:8px;border-radius:8px}
+  @media(max-width:880px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="/tecNM logo.png" alt="" width="100" height="auto" />
+    <h1>División larga en base N (visual + procedimiento)</h1>
+    <div class="small">Soporta bases entre 2 y 36 (0-9, A-Z). Ingresa números usando esas cifras.</div>
+    <a href="/" type="button" class="btn btn-secondary">Regresar</a>
+  </header>
+
+  <section class="card">
+    <form id="form">
+      <div>
+        <label>Dividendo (en la base indicada):</label>
+        <input id="dividendo" value="23810.653" placeholder="Ej: 23810.653" />
+      </div>
+      <div>
+        <label>Divisor (en la base indicada):</label>
+        <input id="divisor" value="53.71" placeholder="Ej: 53.71" />
+      </div>
+      <div>
+        <label>Base (2..36):</label>
+        <input id="base" type="number" min="2" max="36" value="9" />
+      </div>
+      <div>
+        <label>Precisión (dígitos fraccionarios adicionales):</label>
+        <input id="precision" type="number" min="0" max="60" value="12" />
+      </div>
+
+      <div class="full actions">
+        <button type="button" id="calc">Calcular y mostrar procedimiento</button>
+        <button type="button" id="clear" class="secondary">Borrar salida</button>
+      </div>
+
+      <div class="full small">Notas: usa A=10, B=11, ... Z=35. No uses la letra Ñ. Las operaciones (comparaciones, restas, multiplicaciones) se realizan en la base elegida.</div>
+    </form>
+  </section>
+
+  <main>
+    <div class="card">
+      <h3 style="margin-top:0">Long division visual</h3>
+      <div class="out"><pre id="longvisual"></pre></div>
+    </div>
+
+    <div>
+      <div class="card table-mult" style="margin-bottom:10px">
+        <h3 style="margin:8px 0">Tabla de multiplicar (del divisor)</h3>
+        <div class="out" id="multable"><pre></pre></div>
+      </div>
+
+      <div class="card steps">
+        <h3 style="margin:8px 0">Procedimiento paso a paso</h3>
+        <div class="out" id="steps"><pre></pre></div>
+      </div>
+    </div>
+  </main>
+
+  <footer style="margin-top:10px" class="small card">
+    <strong>Uso:</strong> escribe los números en la misma base, pulsa <em>Calcular</em>. El sistema normaliza decimales del divisor multiplicando para convertirlo a entero (esto equivale a desplazar el punto en ambas cifras) y luego realiza la división larga en la base seleccionada. La salida incluye la tabla de multiplicar del divisor hasta el multiplicador base-1 y todos los pasos de resto/multiplicación alineados.
+    <br />
+    <strong>Autor:</strong> Eidal xd 
+    <!-- <img src="/logo_encabezado_2.png" alt="" width="500" height="auto" /> -->
+  </footer>
+</div>
+
+<script>
+// ------- utilidades de base y dígitos -------
+const DIGITS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function charToVal(c){
+  if (!c) return -1;
+  c = c.toUpperCase();
+  const i = DIGITS.indexOf(c);
+  return i; // -1 si inválido
+}
+function valToChar(v){
+  return DIGITS[v] || '?';
+}
+
+// Parsear número en string -> {digits:[], left:countBeforeDot, right:countAfterDot}
+function parseNumber(str, base){
+  str = String(str).trim().toUpperCase();
+  let left = 0, right = 0;
+  let parts = str.split('.');
+  let leftStr = parts[0] || '';
+  let rightStr = parts[1] || '';
+  if (leftStr === '') leftStr = '0';
+  const all = (leftStr + rightStr).split('');
+  const digits = [];
+  for (let ch of all){
+    const v = charToVal(ch);
+    if (v < 0 || v >= base) throw new Error('Dígito "'+ch+'" no permitido para base '+base);
+    digits.push(v);
+  }
+  left = leftStr.length;
+  right = rightStr.length;
+  // quitar ceros a la izquierda (no tocar si todo es 0)
+  while (digits.length>1 && digits[0]===0 && left>1){ digits.shift(); left--; }
+  return {digits, left, right, original: str};
+}
+
+function digitsToString(arr){
+  if (!arr || arr.length===0) return '0';
+  return arr.map(v=>valToChar(v)).join('');
+}
+
+function trimLeadingZeros(a){
+  while(a.length>1 && a[0]===0) a.shift();
+}
+
+function compareDigits(a,b){ // compara arrays de dígitos (enteros, sin punto). retorna 1 si a>b, 0 si eq, -1 si a<b
+  trimLeadingZeros(a); trimLeadingZeros(b);
+  if (a.length > b.length) return 1;
+  if (a.length < b.length) return -1;
+  for (let i=0;i<a.length;i++){
+    if (a[i] > b[i]) return 1;
+    if (a[i] < b[i]) return -1;
+  }
+  return 0;
+}
+
+function cloneArr(a){ return a.slice(); }
+
+// resta a - b (a>=b) en base b
+function subtractDigits(aOrig,bOrig,base){
+  let a = cloneArr(aOrig);
+  let b = cloneArr(bOrig);
+  // alinear a y b a la derecha
+  while (b.length < a.length) b.unshift(0);
+  let res = new Array(a.length).fill(0);
+  let borrow = 0;
+  for (let i = a.length-1; i>=0; i--){
+    let d = a[i] - b[i] - borrow;
+    if (d < 0){ d += base; borrow = 1; } else borrow = 0;
+    res[i] = d;
+  }
+  trimLeadingZeros(res);
+  return res;
+}
+
+// multiplicar array de dígitos por un dígito (0..base-1)
+function multiplyByDigit(aOrig, m, base){
+  if (m===0) return [0];
+  let a = cloneArr(aOrig);
+  let carry = 0;
+  let res = [];
+  for (let i=a.length-1;i>=0;i--){
+    let prod = a[i]*m + carry;
+    res.unshift(prod % base);
+    carry = Math.floor(prod / base);
+  }
+  while (carry>0){ res.unshift(carry % base); carry = Math.floor(carry/base); }
+  trimLeadingZeros(res);
+  return res.length?res:[0];
+}
+
+// multiplicar arrays (a * b) útil para generar tabla cuando b puede tener varios dígitos
+function multiplyDigits(aOrig, bOrig, base){
+  // multiplicación clásica
+  let a = cloneArr(aOrig), b = cloneArr(bOrig);
+  let res = [0];
+  for (let i=b.length-1;i>=0;i--){
+    let part = multiplyByDigit(a, b[i], base);
+    // agregar ceros al final según posición
+    for (let z=0;z< (b.length-1-i); z++) part.push(0);
+    // sumar res + part
+    res = addDigits(res, part, base);
+  }
+  trimLeadingZeros(res);
+  return res;
+}
+
+function addDigits(aOrig,bOrig,base){
+  let a = cloneArr(aOrig), b = cloneArr(bOrig);
+  // alinear a y b a la izquierda (para suma derecha)
+  const la = a.length, lb = b.length;
+  const L = Math.max(la,lb);
+  while (a.length < L) a.unshift(0);
+  while (b.length < L) b.unshift(0);
+  let carry = 0; let res = new Array(L).fill(0);
+  for (let i=L-1;i>=0;i--){
+    let s = a[i]+b[i]+carry;
+    res[i] = s % base; carry = Math.floor(s/base);
+  }
+  while (carry>0){ res.unshift(carry % base); carry = Math.floor(carry/base); }
+  trimLeadingZeros(res);
+  return res;
+}
+
+// devuelve el mayor dígito q (0..base-1) tal que divisor * q <= current
+function findQuotientDigit(current, divisor, base){
+  // búsqueda lineal/binary search
+  let low = 0, high = base-1, best = 0;
+  while (low <= high){
+    let mid = Math.floor((low+high)/2);
+    let prod = multiplyByDigit(divisor, mid, base);
+    let cmp = compareDigits(prod, current);
+    if (cmp <= 0){ best = mid; low = mid+1; } else { high = mid-1; }
+  }
+  return best;
+}
+
+// ---------------- ALGORITMO DE DIVISIÓN LARGA ----------------
+function longDivision(dividendParsed, divisorParsed, base, precision){
+  // Normalizamos multiplicando por base^(decPlacesDivisor) para dejar divisor sin punto
+  const k = divisorParsed.right; // cuantos dígitos fraccionarios tenía el divisor
+  // normalized digits: ya parseNumber devuelve digits sin punto (concat left+right)
+  let D = cloneArr(dividendParsed.digits); // normalized dividend digits
+  let V = cloneArr(divisorParsed.digits); // normalized divisor digits (entero)
+
+  // decimal position within normalized dividend (para mostrar) = original left + k
+  const decPosNormalized = dividendParsed.left + k;
+
+  // Para el algoritmo: trabajamos con D como array de dígitos; permitimos extenderlo con ceros a la derecha para hallar decimales
+
+  // estado
+  let steps = [];
+  let quotientDigits = [];
+  let current = [];
+  let startedQuotient = false;
+  let i = 0; // índice dentro de D (normalizado)
+  let currentStart = undefined; // índice del primer dígito del "current"
+  const originalLen = D.length;
+
+  function pushStep(obj){ steps.push(obj); }
+
+  // proceso sobre los dígitos originales
+  while (i < D.length){
+    // traer abajo
+    current.push(D[i]);
+    if (currentStart === undefined) currentStart = i;
+    trimLeadingZeros(current);
+
+    if (compareDigits(current, V) < 0){
+      // si ya empezamos el cociente, agregamos un 0
+      if (startedQuotient){
+        quotientDigits.push(0);
+        pushStep({type:'zero', start:currentStart, end:i, current: cloneArr(current)});
+      }
+      i++; continue;
+    }
+    // podemos dividir
+    startedQuotient = true;
+    let q = findQuotientDigit(current, V, base);
+    let prod = multiplyByDigit(V, q, base);
+    let rem = subtractDigits(current, prod, base);
+    quotientDigits.push(q);
+    pushStep({type:'normal', start: currentStart, end:i, current: cloneArr(current), q, prod:cloneArr(prod), rem:cloneArr(rem)});
+    current = cloneArr(rem);
+    currentStart = undefined;
+    i++;
+  }
+
+  // hasta aquí se generaron los dígitos de cociente correspondientes a consumir D
+  let decimalIndex = quotientDigits.length; // número de dígitos enteros en el cociente ahora
+
+  // si no se inició el cociente (divisor > dividend enteros), se debe dejar un 0 antes del punto
+  if (!startedQuotient){
+    quotientDigits.push(0);
+    decimalIndex = 1;
+  }
+
+  // ahora, si hay residuo, calculamos precisión fraccional trayendo ceros
+  let fracCount = 0;
+  while (fracCount < precision){
+    // traer un 0
+    current.push(0);
+    if (currentStart === undefined) currentStart = originalLen + fracCount; // indices más allá del original
+    trimLeadingZeros(current);
+    if (compareDigits(current, V) < 0){
+      quotientDigits.push(0);
+      pushStep({type:'frac-zero', start:currentStart, end: originalLen + fracCount, current:cloneArr(current)});
+      fracCount++; continue;
+    }
+    let q = findQuotientDigit(current, V, base);
+    let prod = multiplyByDigit(V, q, base);
+    let rem = subtractDigits(current, prod, base);
+    quotientDigits.push(q);
+    pushStep({type:'frac', start: currentStart, end: originalLen + fracCount, current: cloneArr(current), q, prod:cloneArr(prod), rem:cloneArr(rem)});
+    current = cloneArr(rem);
+    currentStart = undefined;
+    fracCount++;
+  }
+
+  // resultado final
+  return {quotientDigits, decimalIndex, steps, remainder:cloneArr(current), decPosNormalized, normalizedDividend: D, normalizedDivisor: V, originalDividend: dividendParsed, originalDivisor: divisorParsed};
+}
+
+// render del procedimiento como texto tipo división larga (monoespaciado)
+function renderLongVisual(result, base){
+  const D = result.normalizedDividend.slice();
+  const V = result.normalizedDivisor.slice();
+  const steps = result.steps;
+  const decPos = result.decPosNormalized;
+  // vamos a construir líneas
+  // creamos representación del dividendo con punto en decPos si aplica
+  function buildDividendDisplay(extraRightZeros){
+    // formamos a partir de D y ojo si extraRightZeros>0 se añaden ceros a la derecha
+    let arr = D.slice();
+    for (let z=0; z<extraRightZeros; z++) arr.push(0);
+    let s = '';
+    for (let i=0;i<arr.length;i++){
+      if (i===decPos) s += '.';
+      s += valToChar(arr[i]);
+    }
+    // si decPos === arr.length (decimal justo al final), mostrar dot at end
+    if (decPos === arr.length) s += '.';
+    return s;
+  }
+
+  // longitud visual del bloque de dígitos (incluye punto si existe dentro del tamaño) - estimamos con extra right zeros = precision
+  const precisionGuess = 0; // usaremos el mínimo para mostrar; el layout soporta pasos que vayan más a la derecha
+  const dividendDisplay = buildDividendDisplay(0);
+  // construir divisor string
+  const divisorDisplay = (()=>{
+    // intentar reconstruir divisor con punto en su lugar original
+    const op = result.originalDivisor;
+    return op.original; // cadena original
+  })();
+
+  // construiremos una rejilla dinámica: ancho = max(dividendDisplay.length, posición máxima usada por steps) + margen
+  // determinamos la última columna usada por los pasos
+  let maxColUsed = dividendDisplay.length - 1;
+  // cada step usa end index (normalizado) -> convertir a display pos
+  function normToDispIdx(normIdx){
+    // si normIdx < decPos => same, else +1 for dot
+    return (normIdx < decPos) ? normIdx : normIdx + 1;
+  }
+  for (let st of steps){
+    const endDisp = normToDispIdx(st.end);
+    // consider product length
+    if (st.prod){
+      const plen = st.prod.length;
+      const start = endDisp - (plen - 1);
+      maxColUsed = Math.max(maxColUsed, endDisp, start + plen -1);
+    } else {
+      maxColUsed = Math.max(maxColUsed, endDisp);
+    }
+  }
+  // también contemplemos posible precisión adicional (por los ceros traídos), buscaremos el step con highest end
+  let lastStepEnd = steps.length ? steps[steps.length-1].end : D.length-1;
+  maxColUsed = Math.max(maxColUsed, normToDispIdx(lastStepEnd));
+
+  const leftField = divisorDisplay.length + 3; // espacio para divisor + ' | '
+  const totalCols = leftField + 1 + (maxColUsed + 1) + 6; // margen
+
+  // helper para crear una línea de espacios
+  function sp(n){ return ' '.repeat(Math.max(0,n)); }
+  // inicializar líneas
+  let lines = [];
+
+  // Línea 0: colocar cociente (derecha) y una línea mínima vacía (se completará después)
+  // primero la línea que tiene: [espacios][divisor] | [dividendo]
+  const dividendDisplayFull = buildDividendDisplay( Math.max(0, 0) );
+  let lineDividend = '';
+  lineDividend += divisorDisplay + sp(1) + '|' + ' ' + dividendDisplayFull;
+  // colocamos cociente (vamos a construirlo ahora simple: resultado en base con punto en decimalIndex)
+  const qStr = (()=>{
+    const q = result.quotientDigits.map(v=>valToChar(v)).join('');
+    const di = result.decimalIndex;
+    if (di < q.length) return q.slice(0,di) + (di<q.length?'.':'') + q.slice(di);
+    if (di === q.length) return q + '.';
+    // di > q.length -> pad with zeros
+    return q + '.' + '0'.repeat(di - q.length);
+  })();
+  // colocar quotient right-aligned above dividend
+  // compute position where dividend starts on line: indexAfterBar
+  const dividendStartCol = divisorDisplay.length + 3; // 0-based
+  const quotientStartCol = dividendStartCol + Math.max(0, dividendDisplayFull.length - qStr.length);
+  // build first line with spaces and quotient above
+  let lineQuot = sp(quotientStartCol) + qStr;
+  lines.push(lineQuot);
+  // second line dividend
+  lines.push(lineDividend);
+
+  // ahora procesar steps y construir líneas adicionales
+  // pondremos cada producto, su línea de guiones y el resto debajo, añadiendo líneas nuevas
+  for (let st of steps){
+    const endDisp = normToDispIdx(st.end);
+    const productDigits = st.prod ? st.prod : [0];
+    const prodStr = productDigits.map(v=>valToChar(v)).join('');
+    const prodLen = prodStr.length;
+    const prodStart = dividendStartCol + (endDisp - (prodLen -1));
+    // asegurar longitud de lines para insertar
+    // insert product line
+    let lprod = sp(prodStart) + prodStr;
+    lines.push(lprod);
+    // dash line
+    let dashLen = Math.max(prodLen, (st.current? st.current.length : 1));
+    // define dashStart: align with productStart
+    let ldash = sp(prodStart) + '-'.repeat(dashLen);
+    lines.push(ldash);
+    // remainder line
+    if (st.rem){
+      const remStr = st.rem.map(v=>valToChar(v)).join('');
+      const remLen = remStr.length;
+      const remStart = dividendStartCol + (endDisp - (remLen-1));
+      let lrem = sp(remStart) + remStr;
+      lines.push(lrem);
+    }
+  }
+
+  // juntamos todo con saltos
+  return (lines.join('\n'));
+}
+
+// render de pasos detallados legible
+function renderSteps(result, base){
+  const lines = [];
+  lines.push('Base: '+base);
+  lines.push('Dividendo original: '+result.originalDividend.original+' (sin punto: '+digitsToString(result.normalizedDividend)+')');
+  lines.push('Divisor original:  '+result.originalDivisor.original+' (sin punto: '+digitsToString(result.normalizedDivisor)+')');
+  lines.push('');
+  lines.push('Procedimiento (cada paso):');
+  result.steps.forEach((st, idx)=>{
+    const end = st.end;
+    if (st.type === 'normal'){
+      lines.push('Paso '+(idx+1)+': Usando dígitos hasta la posición '+end+' -> actual = '+digitsToString(st.current));
+      lines.push('    Cociente parcial: '+valToChar(st.q));
+      lines.push('    Producto = divisor × '+valToChar(st.q)+' = '+digitsToString(st.prod));
+      lines.push('    Resta: '+digitsToString(st.current)+' - '+digitsToString(st.prod)+' = '+digitsToString(st.rem));
+    } else if (st.type === 'zero' || st.type === 'frac-zero'){
+      lines.push('Paso '+(idx+1)+': Se trajo un dígito, actual = '+digitsToString(st.current)+' (< divisor), por tanto cociente parcial = 0');
+    } else if (st.type === 'frac'){
+      lines.push('Paso '+(idx+1)+': (fracción) actual = '+digitsToString(st.current));
+      lines.push('    Cociente parcial: '+valToChar(st.q));
+      lines.push('    Producto = divisor × '+valToChar(st.q)+' = '+digitsToString(st.prod));
+      lines.push('    Resta = '+digitsToString(st.rem));
+    }
+    lines.push('');
+  });
+
+  lines.push('Cociente final (sin separar): '+result.quotientDigits.map(v=>valToChar(v)).join(''));
+  // poner punto en la posición decimalIndex
+  const q = result.quotientDigits.map(v=>valToChar(v)).join('');
+  const di = result.decimalIndex;
+  let qwithDot = (di < q.length) ? (q.slice(0,di) + '.' + q.slice(di)) : (q + (di===q.length?'.':'') + (di>q.length? '0'.repeat(di-q.length):''));
+  lines.push('Cociente con punto (posición de punto = '+di+'): '+qwithDot);
+  lines.push('Resto final (normalizado): '+digitsToString(result.remainder));
+
+  return lines.join('\n');
+}
+
+// tabla de multiplicar del divisor (hasta base-1). Usamos el divisor original con su decimal place
+function renderMultiplicationTable(originalDivisorParsed, normalizedDivisor, base){
+  const lines = [];
+  // original divisor had right digits count rD
+  const rD = originalDivisorParsed.right;
+  for (let m=1;m<base;m++){
+    // multiplicar normalized divisor (entero) por m -> producto normalizado
+    const prodNorm = multiplyByDigit(normalizedDivisor, m, base);
+    // ahora insertar punto a la izquierda rD posiciones desde el final
+    let prodStr = digitsToString(prodNorm);
+    if (rD > 0){
+      // asegurar longitud
+      if (prodNorm.length <= rD){
+        prodStr = '0.' + '0'.repeat(rD - prodNorm.length) + prodStr;
+      } else {
+        const cut = prodStr.length - rD;
+        prodStr = prodStr.slice(0,cut) + '.' + prodStr.slice(cut);
+      }
+    }
+    lines.push( String(valToChar(m)).padStart(2,' ') + ' × ' + originalDivisorParsed.original.padEnd(8,' ') + ' = ' + prodStr);
+  }
+  return lines.join('\n');
+}
+
+// ------------ UI ------------
+const elLong = document.getElementById('longvisual');
+const elSteps = document.getElementById('steps').querySelector('pre');
+const elTable = document.getElementById('multable').querySelector('pre');
+
+function showError(msg){
+  elLong.textContent = msg;
+  elSteps.textContent = '';
+  elTable.textContent = '';
+}
+
+document.getElementById('calc').addEventListener('click', ()=>{
+  try{
+    const dividendo = document.getElementById('dividendo').value.trim();
+    const divisor = document.getElementById('divisor').value.trim();
+    const base = parseInt(document.getElementById('base').value);
+    const precision = parseInt(document.getElementById('precision').value);
+    if (!dividendo || !divisor) return showError('Introduce dividendo y divisor.');
+    if (!(base>=2 && base<=36)) return showError('Base inválida (2..36).');
+    if (precision < 0 || precision > 60) return showError('Precisión fuera de rango.');
+
+    const dParsed = parseNumber(dividendo, base);
+    const vParsed = parseNumber(divisor, base);
+    // Si divisor == 0
+    if (vParsed.digits.length === 1 && vParsed.digits[0] === 0) return showError('Divisor no puede ser 0.');
+
+    const res = longDivision(dParsed, vParsed, base, precision);
+    // mostrar visual largo
+    elLong.textContent = renderLongVisual(res, base);
+    elSteps.textContent = renderSteps(res, base);
+    elTable.textContent = renderMultiplicationTable(vParsed, res.normalizedDivisor, base);
+  }catch(err){
+    showError('Error: '+err.message);
+  }
+});
+
+document.getElementById('clear').addEventListener('click', ()=>{
+  elLong.textContent = '';
+  elSteps.textContent = '';
+  elTable.textContent = '';
+});
+
+</script>
+</body>
+</html>
